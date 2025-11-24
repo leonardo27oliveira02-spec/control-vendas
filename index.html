@@ -3,23 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control Vendas - App</title>
+    <title>C&M - Controle de Consultor (Reservas)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --cor-laranja: #F5A623;
+            --cor-verde: #C8D946;
+            --cor-turquesa: #4ECDC4;
+            --cor-escuro: #2C5F5D;
+        }
+        .bg-cm-escuro { background-color: var(--cor-escuro); }
+        .bg-cm-laranja { background-color: var(--cor-laranja); }
+        .bg-cm-verde { background-color: var(--cor-verde); }
+        .bg-cm-turquesa { background-color: var(--cor-turquesa); }
+        .text-cm-escuro { color: var(--cor-escuro); }
+        .text-cm-laranja { color: var(--cor-laranja); }
+        .text-cm-verde { color: var(--cor-verde); }
+        .text-cm-turquesa { color: var(--cor-turquesa); }
+        .btn-cm { background: linear-gradient(135deg, var(--cor-laranja), var(--cor-verde), var(--cor-turquesa)); }
+        .btn-cm:hover { opacity: 0.9; }
+    </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-50">
     <div id="app"></div>
 
     <script>
-        // APP INTEIRO EM VANILLA JS
-        class ControlVendas {
+        class ControlConsultor {
             constructor() {
                 this.loggedIn = false;
                 this.userName = '';
                 this.currentPage = 'dashboard';
                 this.clientes = [];
                 this.vendas = [];
-                this.comissaoPadrao = 15;
-                this.camposPersonalizados = [];
+                this.comissaoPadrao = 5;
                 this.filtroDataInicio = this.getDataMesAtual();
                 this.filtroDataFim = this.getDataAtual();
                 
@@ -38,22 +55,20 @@
             }
 
             carregarDados() {
-                const dados = localStorage.getItem('appVendas');
+                const dados = localStorage.getItem('appCM');
                 if (dados) {
-                    const { clientes, vendas, comissao, camposPersonalizados } = JSON.parse(dados);
+                    const { clientes, vendas, comissao } = JSON.parse(dados);
                     this.clientes = clientes || [];
                     this.vendas = vendas || [];
-                    this.comissaoPadrao = comissao || 15;
-                    this.camposPersonalizados = camposPersonalizados || [];
+                    this.comissaoPadrao = comissao || 5;
                 }
             }
 
             salvarDados() {
-                localStorage.setItem('appVendas', JSON.stringify({
+                localStorage.setItem('appCM', JSON.stringify({
                     clientes: this.clientes,
                     vendas: this.vendas,
-                    comissao: this.comissaoPadrao,
-                    camposPersonalizados: this.camposPersonalizados
+                    comissao: this.comissaoPadrao
                 }));
             }
 
@@ -78,7 +93,7 @@
 
             getVendasFiltradas() {
                 return this.vendas.filter(v => {
-                    const dataVenda = new Date(v.dataVenda);
+                    const dataVenda = new Date(v.dataConfirmacao);
                     const dataInicio = new Date(this.filtroDataInicio);
                     const dataFim = new Date(this.filtroDataFim);
                     dataFim.setHours(23, 59, 59, 999);
@@ -86,49 +101,38 @@
                 });
             }
 
-            exportarCSV() {
+            exportarExcel() {
                 const vendsFiltradas = this.getVendasFiltradas();
                 const dataAtual = new Date().toLocaleDateString('pt-BR');
                 
-                const linhas = [];
-                linhas.push(['RELATÓRIO DE VENDAS', dataAtual]);
-                linhas.push(['Agente:', this.userName]);
-                linhas.push(['Período:', `${this.filtroDataInicio} a ${this.filtroDataFim}`]);
-                linhas.push(['']);
-                linhas.push(['Nº RESERVA', 'CLIENTE', 'CHECK-IN', 'CHECK-OUT', 'DIAS', 'VALOR VENDA', 'COMISSÃO %', 'COMISSÃO R$']);
+                const dados = vendsFiltradas.map(v => ({
+                    'Tipo Cliente': v.tipoCliente,
+                    'Nome Cliente': v.nomeCliente,
+                    'Check-in': v.checkIn,
+                    'Check-out': v.checkOut,
+                    'Hotel': v.hotel,
+                    'Valor (R$)': v.valor.toFixed(2),
+                    'Situação': v.situacao,
+                    'Agente': v.agente,
+                    'Voucher': v.voucher,
+                    'Data Confirmação': v.dataConfirmacao,
+                    'Observações': v.observacoes || ''
+                }));
+
+                const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valor || 0), 0);
+                const totalComissao = (totalVendido * this.comissaoPadrao) / 100;
+
+                dados.push({});
+                dados.push({ 'Tipo Cliente': 'RESUMO DO PERÍODO' });
+                dados.push({ 'Tipo Cliente': 'Total de Vendas', 'Nome Cliente': vendsFiltradas.length });
+                dados.push({ 'Tipo Cliente': 'Valor Total (R$)', 'Nome Cliente': totalVendido.toFixed(2) });
+                dados.push({ 'Tipo Cliente': `Comissão ${this.comissaoPadrao}% (R$)`, 'Nome Cliente': totalComissao.toFixed(2) });
+
+                const ws = XLSX.utils.json_to_sheet(dados);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Vendas');
                 
-                vendsFiltradas.forEach(v => {
-                    linhas.push([
-                        v.numeroReserva,
-                        this.getNomeCliente(v.clienteId),
-                        v.checkIn,
-                        v.checkOut,
-                        v.dias,
-                        v.valorTotal.toFixed(2),
-                        v.comissao,
-                        v.valorComissao.toFixed(2)
-                    ]);
-                });
-                
-                linhas.push(['']);
-                linhas.push(['RESUMO DO PERÍODO']);
-                linhas.push(['Total de Vendas', vendsFiltradas.length]);
-                
-                const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valorTotal || 0), 0);
-                const totalComissao = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valorComissao || 0), 0);
-                
-                linhas.push(['Valor Total de Vendas (R$)', totalVendido.toFixed(2)]);
-                linhas.push(['Valor Total de Comissão (R$)', totalComissao.toFixed(2)]);
-                
-                let csv = linhas.map(linha => linha.map(cell => `"${cell}"`).join(',')).join('\n');
-                
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `relatorio_vendas_${new Date().toISOString().split('T')[0]}.csv`;
-                a.click();
-                window.URL.revokeObjectURL(url);
+                XLSX.writeFile(wb, `C&M_Relatorio_Vendas_${new Date().toISOString().split('T')[0]}.xlsx`);
             }
 
             render() {
@@ -136,12 +140,25 @@
                 
                 if (!this.loggedIn) {
                     app.innerHTML = `
-                        <div class="min-h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center p-4">
+                        <div class="min-h-screen bg-cm-escuro flex items-center justify-center p-4">
                             <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
-                                <h1 class="text-3xl font-bold text-center text-blue-600 mb-8">📱 Control Vendas</h1>
-                                <p class="text-gray-600 text-center mb-6">Gerencie suas vendas de hospedagem</p>
-                                <input type="text" id="loginInput" placeholder="Digite seu nome" class="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:border-blue-500" />
-                                <button onclick="app.login(document.getElementById('loginInput').value)" class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition">Entrar</button>
+                                <div class="flex justify-center mb-8">
+                                    <div class="flex gap-2">
+                                        <div class="w-16 h-20 bg-cm-laranja rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-4xl font-bold">C</span>
+                                        </div>
+                                        <div class="w-16 h-20 bg-cm-verde rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-4xl font-bold">&</span>
+                                        </div>
+                                        <div class="w-16 h-20 bg-cm-turquesa rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-4xl font-bold">M</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <h1 class="text-2xl font-bold text-center text-cm-escuro mb-2">Controle de Consultor</h1>
+                                <p class="text-gray-600 text-center mb-6 text-sm">Parques & Resorts - Gestão de Reservas</p>
+                                <input type="text" id="loginInput" placeholder="Digite seu nome" class="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:border-cm-turquesa" />
+                                <button onclick="app.login(document.getElementById('loginInput').value)" class="w-full btn-cm text-white py-3 rounded-lg font-semibold transition">Entrar</button>
                             </div>
                         </div>
                     `;
@@ -153,73 +170,73 @@
                 // DASHBOARD
                 if (this.currentPage === 'dashboard') {
                     const vendsFiltradas = this.getVendasFiltradas();
-                    const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valorTotal || 0), 0);
-                    const totalComissao = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valorComissao || 0), 0);
+                    const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valor || 0), 0);
+                    const totalComissao = (totalVendido * this.comissaoPadrao) / 100;
 
                     conteudo = `
                         <div>
-                            <h2 class="text-2xl font-bold mb-6">Dashboard</h2>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Dashboard</h2>
                             
                             <div class="bg-white p-6 rounded-lg shadow mb-8">
-                                <h3 class="text-lg font-bold mb-4">📅 Filtrar por Período</h3>
+                                <h3 class="text-lg font-bold mb-4 text-cm-escuro">📅 Filtrar por Período</h3>
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
-                                        <label class="block text-sm font-semibold mb-2">Data Início</label>
-                                        <input type="date" id="filtroInicio" value="${this.filtroDataInicio}" class="w-full px-4 py-2 border rounded-lg" />
+                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Início</label>
+                                        <input type="date" id="filtroInicio" value="${this.filtroDataInicio}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
                                     </div>
                                     <div>
-                                        <label class="block text-sm font-semibold mb-2">Data Fim</label>
-                                        <input type="date" id="filtroFim" value="${this.filtroDataFim}" class="w-full px-4 py-2 border rounded-lg" />
+                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Fim</label>
+                                        <input type="date" id="filtroFim" value="${this.filtroDataFim}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
                                     </div>
                                     <div class="flex items-end">
-                                        <button onclick="app.filtroDataInicio = app.getDataMesAtual(); app.filtroDataFim = app.getDataAtual(); app.render();" class="w-full bg-gray-500 hover:bg-gray-600 text-white py-2 rounded-lg font-semibold">Mês Atual</button>
+                                        <button onclick="app.filtroDataInicio = app.getDataMesAtual(); app.filtroDataFim = app.getDataAtual(); app.render();" class="w-full bg-cm-escuro hover:opacity-90 text-white py-2 rounded-lg font-semibold">Mês Atual</button>
                                     </div>
                                 </div>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                                <div class="bg-white p-6 rounded-lg shadow">
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-laranja">
                                     <p class="text-gray-600">Total Vendido</p>
-                                    <p class="text-3xl font-bold text-blue-600">R$ ${totalVendido.toFixed(2)}</p>
-                                    <p class="text-xs text-gray-500 mt-2">${vendsFiltradas.length} vendas</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalVendido.toFixed(2)}</p>
+                                    <p class="text-xs text-gray-500 mt-2">${vendsFiltradas.length} reservas</p>
                                 </div>
-                                <div class="bg-white p-6 rounded-lg shadow">
-                                    <p class="text-gray-600">Total Comissão</p>
-                                    <p class="text-3xl font-bold text-green-600">R$ ${totalComissao.toFixed(2)}</p>
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-verde">
+                                    <p class="text-gray-600">Comissão ${this.comissaoPadrao}%</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalComissao.toFixed(2)}</p>
                                 </div>
-                                <div class="bg-white p-6 rounded-lg shadow">
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-turquesa">
                                     <p class="text-gray-600">Ticket Médio</p>
-                                    <p class="text-3xl font-bold text-purple-600">R$ ${(vendsFiltradas.length > 0 ? totalVendido / vendsFiltradas.length : 0).toFixed(2)}</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${(vendsFiltradas.length > 0 ? totalVendido / vendsFiltradas.length : 0).toFixed(2)}</p>
                                 </div>
                             </div>
 
                             <div class="bg-white p-6 rounded-lg shadow">
                                 <div class="flex justify-between items-center mb-4">
-                                    <h3 class="text-xl font-bold">Vendas do Período</h3>
-                                    ${vendsFiltradas.length > 0 ? '<button onclick="app.exportarCSV()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">📥 Exportar</button>' : ''}
+                                    <h3 class="text-xl font-bold text-cm-escuro">Reservas do Período</h3>
+                                    ${vendsFiltradas.length > 0 ? '<button onclick="app.exportarExcel()" class="bg-cm-verde hover:opacity-90 text-cm-escuro px-4 py-2 rounded-lg font-semibold">📥 Exportar Excel</button>' : ''}
                                 </div>
-                                ${vendsFiltradas.length === 0 ? '<p class="text-gray-500">Nenhuma venda neste período</p>' : `
+                                ${vendsFiltradas.length === 0 ? '<p class="text-gray-500">Nenhuma reserva neste período</p>' : `
                                     <div class="overflow-x-auto">
                                         <table class="w-full text-sm">
-                                            <thead class="bg-gray-100">
+                                            <thead class="bg-cm-escuro text-white">
                                                 <tr>
-                                                    <th class="px-4 py-2 text-left">Nº Reserva</th>
+                                                    <th class="px-4 py-2 text-left">Tipo</th>
                                                     <th class="px-4 py-2 text-left">Cliente</th>
                                                     <th class="px-4 py-2 text-left">Check-in</th>
-                                                    <th class="px-4 py-2 text-left">Check-out</th>
+                                                    <th class="px-4 py-2 text-left">Hotel</th>
                                                     <th class="px-4 py-2 text-left">Valor</th>
-                                                    <th class="px-4 py-2 text-left">Comissão</th>
+                                                    <th class="px-4 py-2 text-left">Situação</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                ${vendsFiltradas.map(v => `
-                                                    <tr class="border-b">
-                                                        <td class="px-4 py-2 font-semibold">${v.numeroReserva}</td>
-                                                        <td class="px-4 py-2">${this.getNomeCliente(v.clienteId)}</td>
+                                                ${vendsFiltradas.map((v, i) => `
+                                                    <tr class="border-b ${i % 2 === 0 ? 'bg-gray-50' : ''}">
+                                                        <td class="px-4 py-2">${v.tipoCliente}</td>
+                                                        <td class="px-4 py-2 font-semibold">${v.nomeCliente}</td>
                                                         <td class="px-4 py-2">${v.checkIn}</td>
-                                                        <td class="px-4 py-2">${v.checkOut}</td>
-                                                        <td class="px-4 py-2 font-semibold">R$ ${v.valorTotal.toFixed(2)}</td>
-                                                        <td class="px-4 py-2 text-green-600 font-bold">R$ ${v.valorComissao.toFixed(2)}</td>
+                                                        <td class="px-4 py-2">${v.hotel}</td>
+                                                        <td class="px-4 py-2 font-semibold text-cm-escuro">R$ ${v.valor.toFixed(2)}</td>
+                                                        <td class="px-4 py-2"><span class="px-2 py-1 rounded text-xs ${v.situacao === 'Confirmada' ? 'bg-green-100 text-green-800' : v.situacao === 'Pendente' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">${v.situacao}</span></td>
                                                     </tr>
                                                 `).join('')}
                                             </tbody>
@@ -235,23 +252,23 @@
                 else if (this.currentPage === 'clientes') {
                     conteudo = `
                         <div>
-                            <h2 class="text-2xl font-bold mb-6">Gerenciar Clientes</h2>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Gerenciar Clientes</h2>
                             
                             <div class="bg-white p-6 rounded-lg shadow mb-8">
-                                <h3 class="text-xl font-bold mb-4">Adicionar Novo Cliente</h3>
+                                <h3 class="text-xl font-bold mb-4 text-cm-escuro">Adicionar Novo Cliente</h3>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <input type="text" id="nomeCliente" placeholder="Nome completo" class="px-4 py-2 border rounded-lg" />
-                                    <input type="tel" id="telefoneCliente" placeholder="Telefone" class="px-4 py-2 border rounded-lg" />
-                                    <input type="text" id="cpfCliente" placeholder="CPF" class="px-4 py-2 border rounded-lg" />
-                                    <input type="email" id="emailCliente" placeholder="Email" class="px-4 py-2 border rounded-lg" />
+                                    <input type="text" id="nomeCliente" placeholder="Nome completo" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="tel" id="telefoneCliente" placeholder="Telefone" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="text" id="cpfCliente" placeholder="CPF" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="email" id="emailCliente" placeholder="Email" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
                                 </div>
-                                <button onclick="app.adicionarCliente()" class="mt-4 w-full bg-blue-600 text-white py-2 rounded-lg font-semibold hover:bg-blue-700">+ Adicionar Cliente</button>
+                                <button onclick="app.adicionarCliente()" class="mt-4 w-full btn-cm text-white py-2 rounded-lg font-semibold">+ Adicionar Cliente</button>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 ${this.clientes.map(c => `
-                                    <div class="bg-white p-4 rounded-lg shadow">
-                                        <h4 class="font-bold text-lg mb-2">${c.nome}</h4>
+                                    <div class="bg-white p-4 rounded-lg shadow border-l-4 border-cm-turquesa">
+                                        <h4 class="font-bold text-lg mb-2 text-cm-escuro">${c.nome}</h4>
                                         <p class="text-gray-600 text-sm">📱 ${c.telefone}</p>
                                         <p class="text-gray-600 text-sm">📧 ${c.email || 'N/A'}</p>
                                         <button onclick="app.deletarCliente(${c.id})" class="mt-3 w-full bg-red-500 text-white py-2 rounded-lg hover:bg-red-600">🗑️ Deletar</button>
@@ -262,46 +279,59 @@
                     `;
                 }
 
-                // VENDAS
+                // VENDAS/RESERVAS
                 else if (this.currentPage === 'vendas') {
                     conteudo = `
                         <div>
-                            <h2 class="text-2xl font-bold mb-6">Registrar Venda</h2>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Registrar Nova Reserva</h2>
                             
                             <div class="bg-white p-6 rounded-lg shadow mb-8">
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                                    <input type="text" id="nReserva" placeholder="Nº da Reserva" class="px-4 py-2 border rounded-lg" />
-                                    <select id="clienteVenda" class="px-4 py-2 border rounded-lg">
-                                        <option value="">Selecionar Cliente</option>
-                                        ${this.clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('')}
+                                    <select id="tipoCliente" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa">
+                                        <option value="">Tipo de Cliente</option>
+                                        <option value="PF">Pessoa Física</option>
+                                        <option value="PJ">Pessoa Jurídica</option>
+                                        <option value="Agência">Agência</option>
                                     </select>
-                                    <input type="text" id="hotelVenda" placeholder="Hotel/Resort" class="px-4 py-2 border rounded-lg" />
-                                    <input type="date" id="checkInVenda" class="px-4 py-2 border rounded-lg" />
-                                    <input type="date" id="checkOutVenda" class="px-4 py-2 border rounded-lg" />
-                                    <input type="number" id="valorVenda" placeholder="Valor Total (R$)" step="0.01" class="px-4 py-2 border rounded-lg" />
-                                    <input type="number" id="comissaoVenda" placeholder="Comissão (%)" step="0.1" value="${this.comissaoPadrao}" class="px-4 py-2 border rounded-lg" />
+                                    <input type="text" id="nomeClienteVenda" placeholder="Nome do Cliente" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="date" id="checkInVenda" placeholder="Check-in" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="date" id="checkOutVenda" placeholder="Check-out" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="text" id="hotelVenda" placeholder="Hotel/Resort" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="number" id="valorVenda" placeholder="Valor (R$)" step="0.01" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <select id="situacaoVenda" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa">
+                                        <option value="">Situação</option>
+                                        <option value="Confirmada">Confirmada</option>
+                                        <option value="Pendente">Pendente</option>
+                                        <option value="Cancelada">Cancelada</option>
+                                    </select>
+                                    <input type="text" id="agenteVenda" placeholder="Agente Responsável" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="text" id="voucherVenda" placeholder="Nº Voucher" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    <input type="date" id="dataConfirmacaoVenda" placeholder="Data de Confirmação" value="${this.getDataAtual()}" class="px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
                                 </div>
-                                <button onclick="app.adicionarVenda()" class="w-full mt-6 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700">✅ Registrar Venda</button>
+                                <textarea id="observacoesVenda" placeholder="Observações" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" rows="3"></textarea>
+                                <button onclick="app.adicionarVenda()" class="w-full mt-6 btn-cm text-white py-3 rounded-lg font-semibold">✅ Registrar Reserva</button>
                             </div>
 
                             <div class="bg-white rounded-lg shadow overflow-x-auto">
                                 <table class="w-full text-sm">
-                                    <thead class="bg-gray-100">
+                                    <thead class="bg-cm-escuro text-white">
                                         <tr>
-                                            <th class="px-4 py-3 text-left">Nº Reserva</th>
+                                            <th class="px-4 py-3 text-left">Tipo</th>
                                             <th class="px-4 py-3 text-left">Cliente</th>
+                                            <th class="px-4 py-3 text-left">Hotel</th>
                                             <th class="px-4 py-3 text-left">Valor</th>
-                                            <th class="px-4 py-3 text-left">Comissão</th>
+                                            <th class="px-4 py-3 text-left">Situação</th>
                                             <th class="px-4 py-3 text-left">Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${this.vendas.map(v => `
-                                            <tr class="border-b">
-                                                <td class="px-4 py-3 font-semibold">${v.numeroReserva}</td>
-                                                <td class="px-4 py-3">${this.getNomeCliente(v.clienteId)}</td>
-                                                <td class="px-4 py-3">R$ ${v.valorTotal.toFixed(2)}</td>
-                                                <td class="px-4 py-3 text-green-600 font-bold">R$ ${v.valorComissao.toFixed(2)}</td>
+                                        ${this.vendas.map((v, i) => `
+                                            <tr class="border-b ${i % 2 === 0 ? 'bg-gray-50' : ''}">
+                                                <td class="px-4 py-3">${v.tipoCliente}</td>
+                                                <td class="px-4 py-3 font-semibold">${v.nomeCliente}</td>
+                                                <td class="px-4 py-3">${v.hotel}</td>
+                                                <td class="px-4 py-3 font-semibold text-cm-escuro">R$ ${v.valor.toFixed(2)}</td>
+                                                <td class="px-4 py-3">${v.situacao}</td>
                                                 <td class="px-4 py-3">
                                                     <button onclick="app.deletarVenda(${v.id})" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">🗑️</button>
                                                 </td>
@@ -318,15 +348,19 @@
                 else if (this.currentPage === 'config') {
                     conteudo = `
                         <div>
-                            <h2 class="text-2xl font-bold mb-6">Configurações</h2>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Configurações</h2>
                             <div class="bg-white p-6 rounded-lg shadow max-w-md">
-                                <h3 class="text-xl font-bold mb-4">Comissão Padrão</h3>
-                                <input type="number" id="comissaoConfig" step="0.1" value="${this.comissaoPadrao}" class="w-full px-4 py-2 border rounded-lg mb-4" />
-                                <button onclick="app.atualizarComissao()" class="w-full bg-blue-600 text-white py-2 rounded-lg mb-4">Salvar</button>
+                                <h3 class="text-xl font-bold mb-4 text-cm-escuro">Comissão Padrão</h3>
+                                <div class="mb-4">
+                                    <label class="block text-sm font-semibold mb-2 text-cm-escuro">Percentual de Comissão (%)</label>
+                                    <input type="number" id="comissaoConfig" step="0.1" value="${this.comissaoPadrao}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                </div>
+                                <button onclick="app.atualizarComissao()" class="w-full btn-cm text-white py-2 rounded-lg mb-4 font-semibold">Salvar Comissão</button>
+                                <p class="text-gray-600 text-sm mb-6">Esta comissão será aplicada automaticamente em todas as vendas</p>
                                 
                                 <div class="mt-8 pt-8 border-t">
                                     <p class="text-gray-600 mb-4">Total de clientes: <strong>${this.clientes.length}</strong></p>
-                                    <p class="text-gray-600 mb-4">Total de vendas: <strong>${this.vendas.length}</strong></p>
+                                    <p class="text-gray-600 mb-4">Total de reservas: <strong>${this.vendas.length}</strong></p>
                                     <button onclick="if(confirm('Limpar todos os dados?')) { app.clientes = []; app.vendas = []; app.salvarDados(); app.render(); }" class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700">🗑️ Limpar Dados</button>
                                 </div>
                             </div>
@@ -335,23 +369,36 @@
                 }
 
                 app.innerHTML = `
-                    <div class="min-h-screen bg-gray-100">
-                        <div class="bg-blue-600 text-white shadow-lg">
+                    <div class="min-h-screen bg-gray-50">
+                        <div class="bg-cm-escuro text-white shadow-lg">
                             <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
-                                <div>
-                                    <h1 class="text-2xl font-bold">📱 Control Vendas</h1>
-                                    <p class="text-blue-100">Bem-vindo, ${this.userName}!</p>
+                                <div class="flex items-center gap-4">
+                                    <div class="flex gap-1">
+                                        <div class="w-8 h-10 bg-cm-laranja rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-xl font-bold">C</span>
+                                        </div>
+                                        <div class="w-8 h-10 bg-cm-verde rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-xl font-bold">&</span>
+                                        </div>
+                                        <div class="w-8 h-10 bg-cm-turquesa rounded flex items-center justify-center">
+                                            <span class="text-cm-escuro text-xl font-bold">M</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h1 class="text-xl font-bold">Controle de Consultor</h1>
+                                        <p class="text-xs text-gray-300">Olá, ${this.userName}!</p>
+                                    </div>
                                 </div>
-                                <button onclick="app.logout()" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg">🚪 Sair</button>
+                                <button onclick="app.logout()" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg text-sm">🚪 Sair</button>
                             </div>
                         </div>
 
                         <div class="bg-white shadow border-b">
                             <div class="max-w-6xl mx-auto flex gap-4 px-4 py-3 overflow-x-auto">
-                                <button onclick="app.currentPage = 'dashboard'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap ${this.currentPage === 'dashboard' ? 'bg-blue-600 text-white' : 'bg-gray-200'}">📊 Dashboard</button>
-                                <button onclick="app.currentPage = 'clientes'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap ${this.currentPage === 'clientes' ? 'bg-blue-600 text-white' : 'bg-gray-200'}">👥 Clientes</button>
-                                <button onclick="app.currentPage = 'vendas'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap ${this.currentPage === 'vendas' ? 'bg-blue-600 text-white' : 'bg-gray-200'}">💰 Vendas</button>
-                                <button onclick="app.currentPage = 'config'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap ${this.currentPage === 'config' ? 'bg-blue-600 text-white' : 'bg-gray-200'}">🔧 Config</button>
+                                <button onclick="app.currentPage = 'dashboard'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'dashboard' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">📊 Dashboard</button>
+                                <button onclick="app.currentPage = 'clientes'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'clientes' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">👥 Clientes</button>
+                                <button onclick="app.currentPage = 'vendas'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'vendas' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">🎫 Reservas</button>
+                                <button onclick="app.currentPage = 'config'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'config' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">🔧 Config</button>
                             </div>
                         </div>
 
@@ -361,7 +408,6 @@
                     </div>
                 `;
 
-                // Adiciona listeners após renderizar
                 this.adicionarListeners();
             }
 
@@ -412,70 +458,58 @@
             }
 
             adicionarVenda() {
-                const numeroReserva = document.getElementById('nReserva')?.value || '';
-                const clienteId = document.getElementById('clienteVenda')?.value || '';
-                const hotel = document.getElementById('hotelVenda')?.value || '';
+                const tipoCliente = document.getElementById('tipoCliente')?.value || '';
+                const nomeCliente = document.getElementById('nomeClienteVenda')?.value || '';
                 const checkIn = document.getElementById('checkInVenda')?.value || '';
                 const checkOut = document.getElementById('checkOutVenda')?.value || '';
-                const valorVenda = document.getElementById('valorVenda')?.value || '';
-                const comissao = parseFloat(document.getElementById('comissaoVenda')?.value || this.comissaoPadrao);
-
-                if (!numeroReserva || !clienteId || !hotel || !checkIn || !checkOut || !valorVenda) {
-                    alert('Preencha todos os campos!');
-                    return;
-                }
-
-                const ci = new Date(checkIn);
-                const co = new Date(checkOut);
-                const dias = Math.ceil((co - ci) / (1000 * 60 * 60 * 24));
-
-                if (dias <= 0) {
-                    alert('Data de saída deve ser depois da data de entrada!');
-                    return;
-                }
-
-                const valorTotal = parseFloat(valorVenda);
-                const valorComissao = (valorTotal * comissao) / 100;
-
-                this.vendas.push({
-                    id: Date.now(),
-                    numeroReserva,
-                    clienteId,
-                    hotel,
-                    checkIn,
-                    checkOut,
-                    dias,
-                    valorTotal,
-                    valorComissao,
-                    comissao,
-                    dataVenda: this.getDataAtual()
-                });
-
-                this.salvarDados();
-                this.render();
-                alert('Venda registrada!');
+                const hotel = document.getElementById('hotelVenda')?.value || '';
+                const valor = parseFloat(document.getElementById('valorVenda')?.value || 0);
+                const situacao = document.getElementById('situacaoVenda')?.value || '';
+const agente = document.getElementById('agenteVenda')?.value || '';
+const voucher = document.getElementById('voucherVenda')?.value || '';
+const dataConfirmacao = document.getElementById('dataConfirmacaoVenda')?.value || '';
+const observacoes = document.getElementById('observacoesVenda')?.value || '';
+                if (!tipoCliente || !nomeCliente || !checkIn || !checkOut || !hotel || !valor || !situacao || !agente || !voucher || !dataConfirmacao) {
+                alert('Preencha todos os campos obrigatórios!');
+                return;
             }
 
-            deletarVenda(id) {
-                if (confirm('Deletar venda?')) {
-                    this.vendas = this.vendas.filter(v => v.id !== id);
-                    this.salvarDados();
-                    this.render();
-                }
-            }
+            this.vendas.push({
+                id: Date.now(),
+                tipoCliente,
+                nomeCliente,
+                checkIn,
+                checkOut,
+                hotel,
+                valor,
+                situacao,
+                agente,
+                voucher,
+                dataConfirmacao,
+                observacoes
+            });
 
-            atualizarComissao() {
-                const novaComissao = parseFloat(document.getElementById('comissaoConfig')?.value || 15);
-                this.comissaoPadrao = novaComissao;
+            this.salvarDados();
+            this.render();
+            alert('Reserva registrada com sucesso!');
+        }
+
+        deletarVenda(id) {
+            if (confirm('Deletar reserva?')) {
+                this.vendas = this.vendas.filter(v => v.id !== id);
                 this.salvarDados();
-                alert('Comissão atualizada!');
                 this.render();
             }
         }
 
-        const app = new ControlVendas();
-    </script>
-</body>
-</html>
-```
+        atualizarComissao() {
+            const novaComissao = parseFloat(document.getElementById('comissaoConfig')?.value || 5);
+            this.comissaoPadrao = novaComissao;
+            this.salvarDados();
+            alert(`Comissão atualizada para ${novaComissao}%!`);
+            this.render();
+        }
+    }
 
+    const app = new ControlConsultor();
+</script>
