@@ -6,6 +6,7 @@
     <title>C&M - Controle de Consultor (Reservas)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --cor-laranja: #F5A623;
@@ -41,6 +42,9 @@
                 this.filtroDataInicio = this.getDataMesAtual();
                 this.filtroDataFim = this.getDataAtual();
                 this.editingId = null;
+                
+                // Histórico de desempenho diário
+                this.historicoDesempenho = [];
                 
                 // Rotina de Trabalho
                 this.rotinaTrabalho = [
@@ -153,10 +157,11 @@
             carregarDados() {
                 const dados = localStorage.getItem('appCMReservas');
                 if (dados) {
-                    const { vendas, comissao, rotinaTrabalho } = JSON.parse(dados);
+                    const { vendas, comissao, rotinaTrabalho, historicoDesempenho } = JSON.parse(dados);
                     this.vendas = vendas || [];
                     this.comissaoPadrao = comissao || 5;
                     if (rotinaTrabalho) this.rotinaTrabalho = rotinaTrabalho;
+                    if (historicoDesempenho) this.historicoDesempenho = historicoDesempenho;
                 }
             }
 
@@ -164,7 +169,8 @@
                 localStorage.setItem('appCMReservas', JSON.stringify({
                     vendas: this.vendas,
                     comissao: this.comissaoPadrao,
-                    rotinaTrabalho: this.rotinaTrabalho
+                    rotinaTrabalho: this.rotinaTrabalho,
+                    historicoDesempenho: this.historicoDesempenho
                 }));
             }
 
@@ -189,6 +195,31 @@
                     this.salvarDados();
                     this.render();
                 }
+            }
+
+            salvarDiaNoHistorico() {
+                const hoje = this.getDataAtual();
+                const tarefasCompletas = this.rotinaTrabalho.filter(t => t.completo).length;
+                const totalTarefas = this.rotinaTrabalho.length;
+                const percentual = Math.round((tarefasCompletas / totalTarefas) * 100);
+
+                // Remove registro do mesmo dia se existir
+                this.historicoDesempenho = this.historicoDesempenho.filter(h => h.data !== hoje);
+                
+                // Adiciona novo registro
+                this.historicoDesempenho.push({
+                    data: hoje,
+                    tarefasCompletas,
+                    totalTarefas,
+                    percentual,
+                    detalhes: this.rotinaTrabalho.map(r => ({
+                        etiqueta: r.etiqueta,
+                        completo: r.completo
+                    }))
+                });
+
+                this.salvarDados();
+                alert(`✅ Dia registrado! Você completou ${percentual}% das tarefas hoje.`);
             }
 
             resetarRotina() {
@@ -261,6 +292,88 @@
                 }
             }
 
+            getHistoricoMesAtual() {
+                const hoje = new Date();
+                const mesAtual = hoje.getMonth();
+                const anoAtual = hoje.getFullYear();
+                
+                return this.historicoDesempenho.filter(h => {
+                    const dataHist = new Date(h.data);
+                    return dataHist.getMonth() === mesAtual && dataHist.getFullYear() === anoAtual;
+                });
+            }
+
+            getDicasPersonalizadas() {
+                const historicoMes = this.getHistoricoMesAtual();
+                if (historicoMes.length === 0) {
+                    return {
+                        inicio: '🚀 Você está começando! Marque suas tarefas diariamente e clique em "Salvar Dia" para acompanhar seu progresso.',
+                        dicas: [
+                            'Comece marcando as tarefas mais importantes da manhã',
+                            'Use a rotina como guia para não esquecer nenhum cliente',
+                            'Ao final do dia, clique em "Salvar Dia" para registrar seu desempenho'
+                        ]
+                    };
+                }
+
+                const mediaPercentual = historicoMes.reduce((sum, h) => sum + h.percentual, 0) / historicoMes.length;
+                const tarefasMaisIncompletas = this.analisarTarefasIncompletas(historicoMes);
+                
+                let mensagemPrincipal = '';
+                let dicas = [];
+
+                if (mediaPercentual >= 90) {
+                    mensagemPrincipal = '🏆 EXCELENTE! Você está com desempenho excepcional! Continue assim!';
+                    dicas = [
+                        'Você é um exemplo de disciplina! Mantenha esse ritmo',
+                        'Considere compartilhar suas estratégias com a equipe',
+                        'Foque em otimizar o tempo de cada tarefa agora'
+                    ];
+                } else if (mediaPercentual >= 75) {
+                    mensagemPrincipal = '👍 MUITO BOM! Você está no caminho certo, mas pode melhorar ainda mais!';
+                    dicas = [
+                        `Atenção especial para: ${tarefasMaisIncompletas[0] || 'todas as tarefas'}`,
+                        'Tente completar pelo menos 90% das tarefas diárias',
+                        'Reserve os últimos 30min do dia para finalizar pendências'
+                    ];
+                } else if (mediaPercentual >= 60) {
+                    mensagemPrincipal = '⚠️ ATENÇÃO! Seu desempenho está abaixo do ideal. Vamos melhorar?';
+                    dicas = [
+                        `Principais dificuldades em: ${tarefasMaisIncompletas.slice(0, 2).join(', ')}`,
+                        'Defina alarmes para cada bloco de horário',
+                        'Comece pelas tarefas mais difíceis pela manhã',
+                        'Peça ajuda ao gestor se necessário'
+                    ];
+                } else {
+                    mensagemPrincipal = '🚨 URGENTE! Seu desempenho precisa melhorar imediatamente!';
+                    dicas = [
+                        'Converse com seu gestor sobre as dificuldades',
+                        'Revise sua rotina e ajuste os horários',
+                        'Foque em completar pelo menos 5 tarefas por dia',
+                        'Elimine distrações durante o expediente',
+                        'Considere fazer um checklist físico também'
+                    ];
+                }
+
+                return { inicio: mensagemPrincipal, dicas };
+            }
+
+            analisarTarefasIncompletas(historico) {
+                const contagem = {};
+                
+                historico.forEach(dia => {
+                    dia.detalhes.forEach(det => {
+                        if (!det.completo) {
+                            contagem[det.etiqueta] = (contagem[det.etiqueta] || 0) + 1;
+                        }
+                    });
+                });
+
+                return Object.entries(contagem)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([etiqueta, _]) => etiqueta);
+            }
+
             getVendasFiltradas() {
                 return this.vendas.filter(v => {
                     const dataVenda = new Date(v.dataConfirmacao);
@@ -304,6 +417,126 @@
                 XLSX.writeFile(wb, `C&M_Relatorio_Vendas_${new Date().toISOString().split('T')[0]}.xlsx`);
             }
 
+            renderGraficos() {
+                setTimeout(() => {
+                    this.renderGraficoDesempenho();
+                    this.renderGraficoTarefas();
+                }, 100);
+            }
+
+            renderGraficoDesempenho() {
+                const ctx = document.getElementById('graficoDesempenho');
+                if (!ctx) return;
+
+                const historicoMes = this.getHistoricoMesAtual();
+                const labels = historicoMes.map(h => {
+                    const data = new Date(h.data);
+                    return `${data.getDate()}/${data.getMonth() + 1}`;
+                });
+                const dados = historicoMes.map(h => h.percentual);
+
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Desempenho Diário (%)',
+                            data: dados,
+                            borderColor: '#4ECDC4',
+                            backgroundColor: 'rgba(78, 205, 196, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            renderGraficoTarefas() {
+                const ctx = document.getElementById('graficoTarefas');
+                if (!ctx) return;
+
+                const historicoMes = this.getHistoricoMesAtual();
+                const tarefas = {};
+
+                // Contar conclusões por etiqueta
+                historicoMes.forEach(dia => {
+                    dia.detalhes.forEach(det => {
+                        if (!tarefas[det.etiqueta]) {
+                            tarefas[det.etiqueta] = { completo: 0, total: 0 };
+                        }
+                        tarefas[det.etiqueta].total++;
+                        if (det.completo) tarefas[det.etiqueta].completo++;
+                    });
+                });
+
+                const labels = Object.keys(tarefas);
+                const percentuais = labels.map(label => {
+                    const t = tarefas[label];
+                    return Math.round((t.completo / t.total) * 100);
+                });
+
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Taxa de Conclusão (%)',
+                            data: percentuais,
+                            backgroundColor: [
+                                '#C8D946',
+                                '#4ECDC4',
+                                '#F5A623',
+                                '#2C5F5D',
+                                '#10B981',
+                                '#3B82F6',
+                                '#EF4444',
+                                '#8B5CF6'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
             render() {
                 const app = document.getElementById('app');
                 
@@ -336,7 +569,134 @@
 
                 let conteudo = '';
 
-                if (this.currentPage === 'rotina') {
+                if (this.currentPage === 'desempenho') {
+                    const historicoMes = this.getHistoricoMesAtual();
+                    const mediaPercentual = historicoMes.length > 0 
+                        ? historicoMes.reduce((sum, h) => sum + h.percentual, 0) / historicoMes.length 
+                        : 0;
+                    
+                    const diasTrabalhados = historicoMes.length;
+                    const melhorDia = historicoMes.length > 0 
+                        ? historicoMes.reduce((max, h) => h.percentual > max.percentual ? h : max)
+                        : null;
+
+                    const dicas = this.getDicasPersonalizadas();
+
+                    conteudo = `
+                        <div>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">📊 Dashboard de Desempenho</h2>
+
+                            <!-- Cards de Estatísticas -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-laranja">
+                                    <p class="text-gray-600 text-sm">Desempenho Médio</p>
+                                    <p class="text-4xl font-bold text-cm-escuro">${mediaPercentual.toFixed(0)}%</p>
+                                    <p class="text-xs text-gray-500 mt-2">Este mês</p>
+                                </div>
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-verde">
+                                    <p class="text-gray-600 text-sm">Dias Trabalhados</p>
+                                    <p class="text-4xl font-bold text-cm-escuro">${diasTrabalhados}</p>
+                                    <p class="text-xs text-gray-500 mt-2">Registrados no sistema</p>
+                                </div>
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-turquesa">
+                                    <p class="text-gray-600 text-sm">Melhor Dia</p>
+                                    <p class="text-4xl font-bold text-cm-escuro">${melhorDia ? melhorDia.percentual + '%' : '--'}</p>
+                                    <p class="text-xs text-gray-500 mt-2">${melhorDia ? new Date(melhorDia.data).toLocaleDateString('pt-BR') : 'Nenhum registro'}</p>
+                                </div>
+                            </div>
+
+                            <!-- Dicas Personalizadas -->
+                            <div class="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg shadow mb-8 border-l-4 border-cm-turquesa">
+                                <h3 class="text-xl font-bold mb-4 text-cm-escuro">💡 Análise e Dicas Personalizadas</h3>
+                                <p class="text-lg font-semibold mb-4 text-gray-700">${dicas.inicio}</p>
+                                <ul class="space-y-2">
+                                    ${dicas.dicas.map(dica => `
+                                        <li class="flex items-start gap-3">
+                                            <span class="text-cm-verde text-xl">✓</span>
+                                            <span class="text-gray-700">${dica}</span>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+
+                            ${historicoMes.length === 0 ? `
+                                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-6 rounded-lg shadow mb-8">
+                                    <h3 class="text-lg font-bold text-yellow-800 mb-2">⚠️ Como Começar?</h3>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                                        <li>Vá para a aba <strong>"✅ Rotina"</strong></li>
+                                        <li>Marque as tarefas que você completar durante o dia</li>
+                                        <li>No final do expediente, clique em <strong>"💾 Salvar Dia"</strong></li>
+                                        <li>Volte aqui para ver seus gráficos e análises!</li>
+                                    </ol>
+                                </div>
+                            ` : `
+                                <!-- Gráficos -->
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                                    <div class="bg-white p-6 rounded-lg shadow">
+                                        <h3 class="text-lg font-bold mb-4 text-cm-escuro">Evolução do Desempenho</h3>
+                                        <div style="height: 300px;">
+                                            <canvas id="graficoDesempenho"></canvas>
+                                        </div>
+                                    </div>
+                                    <div class="bg-white p-6 rounded-lg shadow">
+                                        <h3 class="text-lg font-bold mb-4 text-cm-escuro">Taxa de Conclusão por Tarefa</h3>
+                                        <div style="height: 300px;">
+                                            <canvas id="graficoTarefas"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Histórico Detalhado -->
+                                <div class="bg-white p-6 rounded-lg shadow">
+                                    <h3 class="text-lg font-bold mb-4 text-cm-escuro">Histórico Detalhado do Mês</h3>
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-sm">
+                                            <thead class="bg-cm-escuro text-white">
+                                                <tr>
+                                                    <th class="px-4 py-2 text-left">Data</th>
+                                                    <th class="px-4 py-2 text-left">Completas</th>
+                                                    <th class="px-4 py-2 text-left">Total</th>
+                                                    <th class="px-4 py-2 text-left">Desempenho</th>
+                                                    <th class="px-4 py-2 text-left">Avaliação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${historicoMes.sort((a, b) => new Date(b.data) - new Date(a.data)).map((h, i) => `
+                                                    <tr class="border-b ${i % 2 === 0 ? 'bg-gray-50' : ''}">
+                                                        <td class="px-4 py-2 font-semibold">${new Date(h.data).toLocaleDateString('pt-BR')}</td>
+                                                        <td class="px-4 py-2">${h.tarefasCompletas}</td>
+                                                        <td class="px-4 py-2">${h.totalTarefas}</td>
+                                                        <td class="px-4 py-2">
+                                                            <div class="flex items-center gap-2">
+                                                                <div class="w-20 bg-gray-200 rounded-full h-2">
+                                                                    <div class="bg-cm-verde h-2 rounded-full" style="width: ${h.percentual}%"></div>
+                                                                </div>
+                                                                <span class="font-bold text-cm-escuro">${h.percentual}%</span>
+                                                            </div>
+                                                        </td>
+                                                        <td class="px-4 py-2">
+                                                            ${h.percentual >= 90 ? '🏆 Excelente' : 
+                                                              h.percentual >= 75 ? '👍 Bom' : 
+                                                              h.percentual >= 60 ? '⚠️ Regular' : 
+                                                              '🚨 Fraco'}
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    `;
+
+                    // Renderizar gráficos após o DOM estar pronto
+                    if (historicoMes.length > 0) {
+                        this.renderGraficos();
+                    }
+                }
+
+                else if (this.currentPage === 'rotina') {
                     const tarefasCompletas = this.rotinaTrabalho.filter(t => t.completo).length;
                     const totalTarefas = this.rotinaTrabalho.length;
                     const percentualCompleto = Math.round((tarefasCompletas / totalTarefas) * 100);
@@ -346,7 +706,8 @@
                             <div class="flex justify-between items-center mb-6">
                                 <h2 class="text-2xl font-bold text-cm-escuro">✅ Rotina de Trabalho</h2>
                                 <div class="flex gap-2">
-                                    <button onclick="app.adicionarBlocoRotina()" class="bg-cm-verde hover:opacity-90 text-cm-escuro px-4 py-2 rounded-lg font-semibold">➕ Adicionar Bloco</button>
+                                    <button onclick="app.salvarDiaNoHistorico()" class="bg-cm-laranja hover:opacity-90 text-white px-4 py-2 rounded-lg font-semibold">💾 Salvar Dia</button>
+                                    <button onclick="app.adicionarBlocoRotina()" class="bg-cm-verde hover:opacity-90 text-cm-escuro px-4 py-2 rounded-lg font-semibold">➕ Adicionar</button>
                                     <button onclick="app.resetarRotina()" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold">🔄 Resetar</button>
                                 </div>
                             </div>
@@ -361,6 +722,7 @@
                                     <div class="bg-cm-verde h-4 rounded-full transition-all duration-500" style="width: ${percentualCompleto}%"></div>
                                 </div>
                                 <p class="text-gray-600 text-sm mt-2">${tarefasCompletas} de ${totalTarefas} blocos completados</p>
+                                <p class="text-xs text-orange-600 mt-3">💡 Ao final do dia, clique em "💾 Salvar Dia" para registrar seu desempenho!</p>
                             </div>
 
                             <!-- Cards de Tarefas -->
@@ -445,86 +807,6 @@
                     `;
                 }
 
-                else if (this.currentPage === 'dashboard') {
-                    const vendsFiltradas = this.getVendasFiltradas();
-                    const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valor || 0), 0);
-                    const totalComissao = (totalVendido * this.comissaoPadrao) / 100;
-
-                    conteudo = `
-                        <div>
-                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Dashboard</h2>
-                            
-                            <div class="bg-white p-6 rounded-lg shadow mb-8">
-                                <h3 class="text-lg font-bold mb-4 text-cm-escuro">📅 Filtrar por Período</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Início</label>
-                                        <input type="date" id="filtroInicio" value="${this.filtroDataInicio}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Fim</label>
-                                        <input type="date" id="filtroFim" value="${this.filtroDataFim}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
-                                    </div>
-                                    <div class="flex items-end">
-                                        <button onclick="app.filtroDataInicio = app.getDataMesAtual(); app.filtroDataFim = app.getDataAtual(); app.render();" class="w-full bg-cm-escuro hover:opacity-90 text-white py-2 rounded-lg font-semibold">Mês Atual</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-laranja">
-                                    <p class="text-gray-600">Total Vendido</p>
-                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalVendido.toFixed(2)}</p>
-                                    <p class="text-xs text-gray-500 mt-2">${vendsFiltradas.length} reservas</p>
-                                </div>
-                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-verde">
-                                    <p class="text-gray-600">Comissão ${this.comissaoPadrao}%</p>
-                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalComissao.toFixed(2)}</p>
-                                </div>
-                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-turquesa">
-                                    <p class="text-gray-600">Ticket Médio</p>
-                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${(vendsFiltradas.length > 0 ? totalVendido / vendsFiltradas.length : 0).toFixed(2)}</p>
-                                </div>
-                            </div>
-
-                            <div class="bg-white p-6 rounded-lg shadow">
-                                <div class="flex justify-between items-center mb-4">
-                                    <h3 class="text-xl font-bold text-cm-escuro">Reservas do Período</h3>
-                                    ${vendsFiltradas.length > 0 ? '<button onclick="app.exportarExcel()" class="bg-cm-verde hover:opacity-90 text-cm-escuro px-4 py-2 rounded-lg font-semibold">📥 Exportar Excel</button>' : ''}
-                                </div>
-                                ${vendsFiltradas.length === 0 ? '<p class="text-gray-500">Nenhuma reserva neste período</p>' : `
-                                    <div class="overflow-x-auto">
-                                        <table class="w-full text-sm">
-                                            <thead class="bg-cm-escuro text-white">
-                                                <tr>
-                                                    <th class="px-4 py-2 text-left">Tipo</th>
-                                                    <th class="px-4 py-2 text-left">Cliente</th>
-                                                    <th class="px-4 py-2 text-left">Check-in</th>
-                                                    <th class="px-4 py-2 text-left">Hotel</th>
-                                                    <th class="px-4 py-2 text-left">Valor</th>
-                                                    <th class="px-4 py-2 text-left">Situação</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                ${vendsFiltradas.map((v, i) => `
-                                                    <tr class="border-b ${i % 2 === 0 ? 'bg-gray-50' : ''}">
-                                                        <td class="px-4 py-2">${v.tipoCliente}</td>
-                                                        <td class="px-4 py-2 font-semibold">${v.nomeCliente}</td>
-                                                        <td class="px-4 py-2">${v.checkIn}</td>
-                                                        <td class="px-4 py-2">${v.hotel}</td>
-                                                        <td class="px-4 py-2 font-semibold text-cm-escuro">R$ ${v.valor.toFixed(2)}</td>
-                                                        <td class="px-4 py-2"><span class="px-2 py-1 rounded text-xs ${v.situacao === 'Confirmada' ? 'bg-green-100 text-green-800' : v.situacao === 'Pendente' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">${v.situacao}</span></td>
-                                                    </tr>
-                                                `).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                `}
-                            </div>
-                        </div>
-                    `;
-                }
-
                 else if (this.currentPage === 'vendas') {
                     const vendaEdit = this.editingId ? this.vendas.find(v => v.id === this.editingId) : null;
 
@@ -600,6 +882,86 @@
                     `;
                 }
 
+                else if (this.currentPage === 'dashboard') {
+                    const vendsFiltradas = this.getVendasFiltradas();
+                    const totalVendido = vendsFiltradas.reduce((sum, v) => sum + parseFloat(v.valor || 0), 0);
+                    const totalComissao = (totalVendido * this.comissaoPadrao) / 100;
+
+                    conteudo = `
+                        <div>
+                            <h2 class="text-2xl font-bold mb-6 text-cm-escuro">Dashboard de Vendas</h2>
+                            
+                            <div class="bg-white p-6 rounded-lg shadow mb-8">
+                                <h3 class="text-lg font-bold mb-4 text-cm-escuro">📅 Filtrar por Período</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Início</label>
+                                        <input type="date" id="filtroInicio" value="${this.filtroDataInicio}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold mb-2 text-cm-escuro">Data Fim</label>
+                                        <input type="date" id="filtroFim" value="${this.filtroDataFim}" class="w-full px-4 py-2 border rounded-lg focus:border-cm-turquesa" />
+                                    </div>
+                                    <div class="flex items-end">
+                                        <button onclick="app.filtroDataInicio = app.getDataMesAtual(); app.filtroDataFim = app.getDataAtual(); app.render();" class="w-full bg-cm-escuro hover:opacity-90 text-white py-2 rounded-lg font-semibold">Mês Atual</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-laranja">
+                                    <p class="text-gray-600">Total Vendido</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalVendido.toFixed(2)}</p>
+                                    <p class="text-xs text-gray-500 mt-2">${vendsFiltradas.length} reservas</p>
+                                </div>
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-verde">
+                                    <p class="text-gray-600">Comissão ${this.comissaoPadrao}%</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${totalComissao.toFixed(2)}</p>
+                                </div>
+                                <div class="bg-white p-6 rounded-lg shadow border-t-4 border-cm-turquesa">
+                                    <p class="text-gray-600">Ticket Médio</p>
+                                    <p class="text-3xl font-bold text-cm-escuro">R$ ${(vendsFiltradas.length > 0 ? totalVendido / vendsFiltradas.length : 0).toFixed(2)}</p>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-6 rounded-lg shadow">
+                                <div class="flex justify-between items-center mb-4">
+                                    <h3 class="text-xl font-bold text-cm-escuro">Reservas do Período</h3>
+                                    ${vendsFiltradas.length > 0 ? '<button onclick="app.exportarExcel()" class="bg-cm-verde hover:opacity-90 text-cm-escuro px-4 py-2 rounded-lg font-semibold">📥 Exportar Excel</button>' : ''}
+                                </div>
+                                ${vendsFiltradas.length === 0 ? '<p class="text-gray-500">Nenhuma reserva neste período</p>' : `
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-sm">
+                                            <thead class="bg-cm-escuro text-white">
+                                                <tr>
+                                                    <th class="px-4 py-2 text-left">Tipo</th>
+                                                    <th class="px-4 py-2 text-left">Cliente</th>
+                                                    <th class="px-4 py-2 text-left">Check-in</th>
+                                                    <th class="px-4 py-2 text-left">Hotel</th>
+                                                    <th class="px-4 py-2 text-left">Valor</th>
+                                                    <th class="px-4 py-2 text-left">Situação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${vendsFiltradas.map((v, i) => `
+                                                    <tr class="border-b ${i % 2 === 0 ? 'bg-gray-50' : ''}">
+                                                        <td class="px-4 py-2">${v.tipoCliente}</td>
+                                                        <td class="px-4 py-2 font-semibold">${v.nomeCliente}</td>
+                                                        <td class="px-4 py-2">${v.checkIn}</td>
+                                                        <td class="px-4 py-2">${v.hotel}</td>
+                                                        <td class="px-4 py-2 font-semibold text-cm-escuro">R$ ${v.valor.toFixed(2)}</td>
+                                                        <td class="px-4 py-2"><span class="px-2 py-1 rounded text-xs ${v.situacao === 'Confirmada' ? 'bg-green-100 text-green-800' : v.situacao === 'Pendente' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">${v.situacao}</span></td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                    `;
+                }
+
                 else if (this.currentPage === 'config') {
                     conteudo = `
                         <div>
@@ -616,7 +978,8 @@
                                 <div class="mt-8 pt-8 border-t">
                                     <p class="text-gray-600 mb-4">Total de reservas: <strong>${this.vendas.length}</strong></p>
                                     <p class="text-gray-600 mb-4">Blocos de rotina: <strong>${this.rotinaTrabalho.length}</strong></p>
-                                    <button onclick="if(confirm('Limpar todos os dados?')) { app.vendas = []; app.salvarDados(); app.render(); }" class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700">🗑️ Limpar Dados</button>
+                                    <p class="text-gray-600 mb-4">Histórico de dias: <strong>${this.historicoDesempenho.length}</strong></p>
+                                    <button onclick="if(confirm('Limpar todos os dados?')) { app.vendas = []; app.historicoDesempenho = []; app.salvarDados(); app.render(); }" class="w-full bg-red-600 text-white py-2 rounded-lg hover:bg-red-700">🗑️ Limpar Todos os Dados</button>
                                 </div>
                             </div>
                         </div>
@@ -650,8 +1013,9 @@
 
                         <div class="bg-white shadow border-b">
                             <div class="max-w-6xl mx-auto flex gap-4 px-4 py-3 overflow-x-auto">
-                                <button onclick="app.currentPage = 'dashboard'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'dashboard' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">📊 Dashboard</button>
+                                <button onclick="app.currentPage = 'desempenho'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'desempenho' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">📊 Desempenho</button>
                                 <button onclick="app.currentPage = 'rotina'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'rotina' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">✅ Rotina</button>
+                                <button onclick="app.currentPage = 'dashboard'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'dashboard' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">💰 Vendas</button>
                                 <button onclick="app.currentPage = 'vendas'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'vendas' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">🎫 Reservas</button>
                                 <button onclick="app.currentPage = 'config'; app.render();" class="px-4 py-2 rounded-lg whitespace-nowrap font-semibold ${this.currentPage === 'config' ? 'bg-cm-turquesa text-white' : 'bg-gray-200 text-gray-700'}">🔧 Config</button>
                             </div>
